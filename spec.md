@@ -1,35 +1,35 @@
 # Cross-Mod Item Selection Interop Spec v1
 
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119).
+
 ## Purpose
 
 Allow Factorio 2.0 mods to broadcast item/fluid selection events so that other mods can track recent selections and offer quick-access buttons.
 
 ## Remote Interface
 
-Each participating mod exposes the following functions via `remote.add_interface`:
+Mods that publish item selections MUST expose the following functions via `remote.add_interface`:
 
-### Required
+### `get_on_item_selected() -> uint`
 
-#### `get_on_item_selected() -> uint`
+Returns the custom event ID for the `on_item_selected` event.
 
-Returns the custom event ID for the `on_item_selected` event. The event ID should be lazily generated on first call via `script.generate_event_name()`.
+### `version() -> uint`
 
-#### `version() -> uint`
+Returns the interop spec version. Implementations of this version of the spec MUST return `1`.
 
-Returns the interop spec version (currently `1`).
-
-### Event Payload: `on_item_selected`
+## `on_item_selected` Event Payload
 
 Raised via `script.raise_event` when a player selects an item or fluid in the mod's GUI.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `player_index` | `uint` | The player who selected the item |
-| `item_name` | `string` | The prototype name of the selected item or fluid |
+| `player_index` | `uint` | REQUIRED. The player who selected the item. |
+| `item_name` | `string` | REQUIRED. The prototype name of the selected item or fluid. |
 
 ## Auto-Discovery
 
-At `on_init`, `on_load`, and `on_configuration_changed`, each mod iterates `remote.interfaces` and subscribes to any other mod that exposes `get_on_item_selected`:
+Mods that wish to receive external item selections MUST subscribe to other mods' events at `on_init`, `on_load`, and `on_configuration_changed`. Mods MUST iterate `remote.interfaces` and subscribe to any mod that exposes `get_on_item_selected`, skipping their own interface:
 
 ```lua
 for iface, functions in pairs(remote.interfaces) do
@@ -46,57 +46,13 @@ for iface, functions in pairs(remote.interfaces) do
 end
 ```
 
-## Re-Entrancy Guard
+## Handling External Events
 
-To prevent echo loops (Mod A selects item -> broadcasts -> Mod B receives -> broadcasts -> Mod A receives...), each mod should use a `handling_external` flag:
-
-```lua
-local handling_external = false
-
-local function raise_item_selected(player_index, item_name)
-  if handling_external then return end
-  script.raise_event(on_item_selected, {
-    player_index = player_index,
-    item_name = item_name,
-  })
-end
-```
-
-Set `handling_external = true` before processing incoming external events if your mod would re-broadcast as a side effect.
-
-## Recent Items Panel
-
-Each mod maintains a per-player list of the last 5 externally-selected items:
-
-```lua
-storage.recent_external_items[player_index] = {
-  { item_name = "iron-plate", source = "bottleneck-analyzer" },
-  { item_name = "copper-cable", source = "cybersyn" },
-  -- ...
-}
-```
-
-### Storage Rules
-
-- **Deduplication**: If an item already exists in the list, remove the old entry before inserting at the front.
-- **Cap**: Maximum 5 entries per player.
-- **Persistence**: Stored in `storage` so it survives save/load.
-- **Migration**: Initialize `storage.recent_external_items = {}` in `on_init` and ensure it exists in `on_configuration_changed`.
-
-### GUI Rendering
-
-Recent items are displayed as `sprite-button` elements (style `frame_action_button`) embedded in the mod's titlebar. Clicking a recent item selects it in the current mod and broadcasts the selection to other mods.
-
-### Behavior
-
-- External events should **not** automatically change the mod's active filter/selection. They should only add to the recent items list.
-- The recent panel updates immediately if the mod's GUI is open when an external event arrives.
-- The recent panel is refreshed when the GUI is opened.
-- Clicking a recent item navigates to that item within the mod and broadcasts the selection.
+External events MUST NOT automatically change the mod's active filter or selection, and MUST NOT trigger a re-broadcast of `on_item_selected`. How a mod uses incoming events (e.g., displaying a recent items panel) is an implementation detail.
 
 ## Prototype Validation
 
-Before processing an incoming item name, verify it exists:
+Mods MUST validate incoming item names before processing them:
 
 ```lua
 if item_name and (prototypes.item[item_name] or prototypes.fluid[item_name]) then
@@ -106,4 +62,10 @@ end
 
 ## Scope
 
-This spec covers **items and fluids only**. Recipes, entities, technologies, and other prototype types are not broadcast. Mods that work with entities (e.g., Recipe Book opening an entity page) should resolve to the corresponding item if possible before broadcasting.
+This spec covers items and fluids only. Recipes, entities, technologies, and other prototype types MUST NOT be broadcast. Mods that work with entities (e.g., Recipe Book opening an entity page) SHOULD resolve to the corresponding item if possible before broadcasting.
+
+## Versioning
+
+The spec version (`1`) MUST only be incremented for breaking changes: new required fields in the event payload, new required remote functions, or changes to existing behavior.
+
+Additive changes (new optional events like `on_time_slice_changed`) do not require a version bump. Mods SHOULD check for the presence of specific functions (e.g., `functions["get_on_time_slice_changed"]`) rather than relying on the version number for optional features.
