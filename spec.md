@@ -14,7 +14,7 @@ Mods that publish item selections MUST expose the following functions via `remot
 
 Returns the custom event ID for the `on_item_selected` event.
 
-### `version() -> uint`
+### `interop_version() -> uint`
 
 Returns the interop spec version. Implementations of this version of the spec MUST return `1`.
 
